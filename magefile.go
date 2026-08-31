@@ -41,7 +41,12 @@ import (
 	"syscall"
 	"time"
 
+	"code.vikunja.io/api/pkg/config"
+	apiv2 "code.vikunja.io/api/pkg/routes/api/v2"
+
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/iancoleman/strcase"
+	"github.com/labstack/echo/v5"
 	"github.com/magefile/mage/mg"
 )
 
@@ -61,23 +66,24 @@ var (
 
 	// Aliases are mage aliases of targets
 	Aliases = map[string]any{
-		"build":                  Build.Build,
-		"check:got-swag":         Check.GotSwag,
-		"dev:make-migration":     Dev.MakeMigration,
-		"dev:make-event":         Dev.MakeEvent,
-		"dev:make-listener":      Dev.MakeListener,
-		"dev:make-notification":  Dev.MakeNotification,
-		"dev:prepare-worktree":   Dev.PrepareWorktree,
-		"dev:tag-release":        Dev.TagRelease,
-		"test:e2e":               Test.E2E,
-		"test:e2e-api":           Test.E2EApi,
-		"plugins:build":          Plugins.Build,
-		"lint":                   Check.Golangci,
-		"lint:fix":               Check.GolangciFix,
-		"generate:config-yaml":   Generate.ConfigYAML,
-		"generate:swagger-docs":  Generate.SwaggerDocs,
-		"generate:yaegi-symbols": Generate.YaegiSymbols,
-		"check:yaegi-symbols":    Check.YaegiSymbols,
+		"build":                    Build.Build,
+		"check:got-swag":           Check.GotSwag,
+		"dev:make-migration":       Dev.MakeMigration,
+		"dev:make-event":           Dev.MakeEvent,
+		"dev:make-listener":        Dev.MakeListener,
+		"dev:make-notification":    Dev.MakeNotification,
+		"dev:prepare-worktree":     Dev.PrepareWorktree,
+		"dev:tag-release":          Dev.TagRelease,
+		"test:e2e":                 Test.E2E,
+		"test:e2e-api":             Test.E2EApi,
+		"plugins:build":            Plugins.Build,
+		"lint":                     Check.Golangci,
+		"lint:fix":                 Check.GolangciFix,
+		"generate:config-yaml":     Generate.ConfigYAML,
+		"generate:frontend-client": Generate.FrontendClient,
+		"generate:swagger-docs":    Generate.SwaggerDocs,
+		"generate:yaegi-symbols":   Generate.YaegiSymbols,
+		"check:yaegi-symbols":      Check.YaegiSymbols,
 	}
 )
 
@@ -1409,6 +1415,78 @@ func (n *` + name + `) Name() string {
 type Generate mg.Namespace
 
 const DefaultConfigYAMLSamplePath = "config.yml.sample"
+
+func canonicalFrontendAPI() (huma.API, error) {
+	config.InitDefaultConfig()
+	config.AuthLocalEnabled.Set(true)
+	config.AuthOpenIDEnabled.Set(true)
+	config.ServiceEnableRegistration.Set(true)
+	config.ServiceEnableLinkSharing.Set(true)
+	config.ServiceEnableTotp.Set(true)
+	config.ServiceEnableTaskAttachments.Set(true)
+	config.ServiceEnableTaskComments.Set(true)
+	config.WebhooksEnabled.Set(true)
+	config.BackgroundsEnabled.Set(true)
+	config.BackgroundsUploadEnabled.Set(true)
+	config.BackgroundsUnsplashEnabled.Set(true)
+	config.MigrationTodoistEnable.Set(true)
+	config.MigrationTrelloEnable.Set(true)
+	config.MigrationMicrosoftTodoEnable.Set(true)
+	config.ServiceTestingtoken.Set("")
+	config.ServicePublicURL.Set("")
+
+	e := echo.New()
+	api := apiv2.NewAPI(e, e.Group(apiv2.GroupPrefix))
+	apiv2.RegisterAll(api)
+	document := api.OpenAPI()
+	document.Servers = []*huma.Server{{URL: apiv2.GroupPrefix}}
+
+	callback := document.Paths["/auth/openid/{provider}/callback"]
+	if callback == nil || callback.Post == nil {
+		return nil, errors.New("canonical API is missing POST /auth/openid/{provider}/callback")
+	}
+	for path := range document.Paths {
+		if strings.HasPrefix(path, "/test/") {
+			return nil, fmt.Errorf("canonical API unexpectedly contains %s", path)
+		}
+	}
+
+	return api, nil
+}
+
+// FrontendClient generates the typed frontend client from the canonical v2 API.
+func (Generate) FrontendClient(ctx context.Context) error {
+	api, err := canonicalFrontendAPI()
+	if err != nil {
+		return err
+	}
+
+	spec, err := os.CreateTemp("", "vikunja-openapi-*.json")
+	if err != nil {
+		return fmt.Errorf("create temporary OpenAPI document: %w", err)
+	}
+	specPath := spec.Name()
+	defer func() { _ = os.Remove(specPath) }()
+
+	if err := json.NewEncoder(spec).Encode(api.OpenAPI()); err != nil {
+		_ = spec.Close()
+		return fmt.Errorf("write temporary OpenAPI document: %w", err)
+	}
+	if err := spec.Close(); err != nil {
+		return fmt.Errorf("close temporary OpenAPI document: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "pnpm", "run", "generate:api-client")
+	cmd.Dir = "frontend"
+	cmd.Env = append(os.Environ(), "VIKUNJA_OPENAPI_INPUT="+specPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("generate frontend API client: %w", err)
+	}
+
+	return nil
+}
 
 // SwaggerDocs generates the swagger docs from the code annotations
 func (Generate) SwaggerDocs(ctx context.Context) error {
