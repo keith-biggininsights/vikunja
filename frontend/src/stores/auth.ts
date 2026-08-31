@@ -28,6 +28,7 @@ import {DATE_DISPLAY} from '@/constants/dateDisplay'
 import {TIME_FORMAT} from '@/constants/timeFormat'
 import {RELATION_KIND} from '@/types/IRelationKind'
 import type {IProvider} from '@/types/IProvider'
+import {queryClient} from '@/client/queryClient'
 
 // Set on explicit logout so the login page won't immediately bounce the user
 // back to the OIDC provider. Lives in sessionStorage so it survives the
@@ -573,6 +574,7 @@ export const useAuthStore = defineStore('auth', () => {
 		const loggedInVia = getLoggedInVia()
 		window.localStorage.clear() // Clear all settings and history we might have saved in local storage.
 		lastUserInfoRefresh.value = null
+		queryClient.clear()
 
 		sessionStorage.setItem(JUST_LOGGED_OUT_KEY, 'true')
 

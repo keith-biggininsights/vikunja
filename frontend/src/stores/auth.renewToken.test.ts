@@ -4,7 +4,8 @@ import {setActivePinia, createPinia} from 'pinia'
 import {useAuthStore} from './auth'
 import {AUTH_TYPES} from '@/modelTypes/IUser'
 
-const {refreshTokenMock, routerPushMock, getTokenMock} = vi.hoisted(() => ({
+const {queryClientClearMock, refreshTokenMock, routerPushMock, getTokenMock} = vi.hoisted(() => ({
+	queryClientClearMock: vi.fn(),
 	refreshTokenMock: vi.fn(),
 	routerPushMock: vi.fn(),
 	getTokenMock: vi.fn(() => null as string | null),
@@ -19,6 +20,10 @@ vi.mock('@/helpers/auth', () => ({
 
 vi.mock('@/router', () => ({
 	default: {push: routerPushMock},
+}))
+
+vi.mock('@/client/queryClient', () => ({
+	queryClient: {clear: queryClientClearMock},
 }))
 
 vi.mock('@/composables/useWebSocket', () => ({
@@ -73,6 +78,7 @@ describe('auth store renewToken retry (issue #2863)', () => {
 	beforeEach(() => {
 		setActivePinia(createPinia())
 		refreshTokenMock.mockReset()
+		queryClientClearMock.mockReset()
 		routerPushMock.mockReset()
 		getTokenMock.mockReset().mockReturnValue(null)
 	})
@@ -135,5 +141,20 @@ describe('auth store renewToken retry (issue #2863)', () => {
 
 		// Initial attempt + exactly one retry — never more.
 		expect(refreshTokenMock).toHaveBeenCalledTimes(2)
+	})
+})
+
+describe('auth store logout query lifecycle', () => {
+	beforeEach(() => {
+		setActivePinia(createPinia())
+		queryClientClearMock.mockReset()
+		routerPushMock.mockReset().mockResolvedValue(undefined)
+	})
+
+	it('clears server data before navigating away', async () => {
+		await useAuthStore().logout()
+
+		expect(queryClientClearMock).toHaveBeenCalledOnce()
+		expect(queryClientClearMock.mock.invocationCallOrder[0]).toBeLessThan(routerPushMock.mock.invocationCallOrder[0])
 	})
 })

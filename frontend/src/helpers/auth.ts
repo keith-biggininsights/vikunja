@@ -26,6 +26,17 @@ export const getToken = (): string | null => {
 	return savedToken
 }
 
+export function getTokenType(token: string | null): number | null {
+	if (!token) return null
+	try {
+		const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+		const payload = JSON.parse(atob(base64))
+		return typeof payload.type === 'number' ? payload.type : null
+	} catch {
+		return null
+	}
+}
+
 /**
  * Removes all tokens everywhere.
  */
@@ -164,4 +175,3 @@ async function doRefresh(persist: boolean): Promise<void> {
 		await refreshUnderLock()
 	}
 }
-
