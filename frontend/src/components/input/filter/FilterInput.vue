@@ -2,7 +2,7 @@
 import {onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {useI18n} from 'vue-i18n'
 import DatepickerWithValues from '@/components/date/DatepickerWithValues.vue'
-import {useLabelStore} from '@/stores/labels'
+import {useLabels} from '@/composables/useLabels'
 import {useProjectStore} from '@/stores/projects'
 import {
 	transformFilterStringForApi,
@@ -28,7 +28,7 @@ const emit = defineEmits(['update:modelValue'])
 const {t} = useI18n()
 
 // Services and stores for autocomplete
-const labelStore = useLabelStore()
+const {getLabelByExactTitle, getLabelById} = useLabels()
 const projectStore = useProjectStore()
 
 // Date picker functionality
@@ -135,7 +135,7 @@ const editor = useEditor({
 const processContent = (content: string) => {
 	return transformFilterStringForApi(
 		content,
-		labelTitle => labelStore.getLabelByExactTitle(labelTitle)?.id || null,
+		labelTitle => getLabelByExactTitle(labelTitle)?.id || null,
 		projectTitle => {
 			const found = projectStore.findProjectByExactname(projectTitle)
 			return found?.id || null
@@ -168,7 +168,7 @@ function setEditorContentFromModelValue(newValue: string | undefined) {
 
 	const content = newValue ? transformFilterStringFromApi(
 		newValue,
-		labelId => labelStore.getLabelById(labelId)?.title || null,
+		labelId => getLabelById(labelId)?.title || null,
 		projectId => projectStore.projects[projectId]?.title || null,
 	) : ''
 

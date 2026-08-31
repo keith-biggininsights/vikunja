@@ -5,7 +5,7 @@ import type {IProjectView} from '@/modelTypes/IProjectView'
 import type {IFilters} from '@/modelTypes/ISavedFilter'
 
 import {hasFilterQuery, transformFilterStringForApi, transformFilterStringFromApi} from '@/helpers/filters'
-import {useLabelStore} from '@/stores/labels'
+import {useLabels} from '@/composables/useLabels'
 import {useProjectStore} from '@/stores/projects'
 
 import XButton from '@/components/input/Button.vue'
@@ -30,14 +30,14 @@ const emit = defineEmits<{
 
 const view = ref<IProjectView>()
 
-const labelStore = useLabelStore()
+const {getLabelByExactTitle, getLabelById} = useLabels()
 const projectStore = useProjectStore()
 
 onBeforeMount(() => {
 	const transformFilterFromApi = (filterInput: IFilters): IFilter => {
 		const filterString = transformFilterStringFromApi(
 			filterInput.filter,
-			labelId => labelStore.getLabelById(labelId)?.title || null,
+			labelId => getLabelById(labelId)?.title || null,
 			projectId => projectStore.projects[projectId]?.title || null,
 		)
 
@@ -97,7 +97,7 @@ function save() {
 	const transformFilterForApi = (filterInput: IFilters): IFilters => {
 		const filterString = transformFilterStringForApi(
 			filterInput?.filter || '',
-			labelTitle => labelStore.getLabelByExactTitle(labelTitle)?.id || null,
+			labelTitle => getLabelByExactTitle(labelTitle)?.id || null,
 			projectTitle => {
 				const found = projectStore.findProjectByExactname(projectTitle)
 				return found?.id || null

@@ -10,7 +10,10 @@ import {
 	LABEL_FIELDS,
 	PROJECT_FIELDS,
 } from '@/helpers/filters'
-import {useLabelStore} from '@/stores/labels'
+import {getLabelByExactTitle, labelKeys} from '@/client/queries/labels'
+import {queryClient} from '@/client/queryClient'
+import type {Label} from '@/client/generated'
+import {getLabelColor} from '@/composables/useLabelStyles'
 import {getTextColor} from '@/helpers/color/getTextColor'
 import {Node} from '@tiptap/pm/model'
 
@@ -38,7 +41,7 @@ function decorateDocument(doc: Node) {
 
 	const text = doc.textContent
 
-	const labelStore = useLabelStore()
+	const labels = queryClient.getQueryData<Label[]>(labelKeys.all) ?? []
 
 	const fieldRegex = new RegExp(`\\b(${AVAILABLE_FILTER_FIELDS.join('|')})\\b`, 'g')
 	const operatorRegex = new RegExp(FILTER_OPERATORS_REGEX, 'g')
@@ -93,7 +96,7 @@ function decorateDocument(doc: Node) {
 			const valueEnd = valueStart + labelValue.length
 
 			const addLabelDecoration = (labelValue: string, start: number, end: number) => {
-				const label = labelStore.getLabelByExactTitle(labelValue)
+				const label = getLabelByExactTitle(labels, labelValue)
 
 				const from = findPosForIndex(doc, start)
 				const to = findPosForIndex(doc, end)
@@ -105,11 +108,12 @@ function decorateDocument(doc: Node) {
 				valueRanges.push({start, end})
 
 				if (label) {
+					const color = getLabelColor(label)
 					// Use label color if found
 					decorations.push(
 						Decoration.inline(from, to, {
 							class: 'label-value',
-							style: `background-color: ${label.hexColor}; color: ${getTextColor(label.hexColor)};`,
+							style: `background-color: ${color}; color: ${getTextColor(color)};`,
 						}),
 					)
 					
