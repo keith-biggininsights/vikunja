@@ -6,8 +6,9 @@ name: hearth image
 #
 # `hearth-*` is chosen so this is the only workflow a deploy tag can start:
 # upstream's ci.yml triggers on `v*` tags and on `main`, and nothing here pushes
-# either. That also means never `git push origin hearth --tags` — that would push
-# every inherited `v*` tag and fire a release build per tag.
+# either. Push deploy tags by full ref, never `--tags`: a merge cadence fetches
+# upstream's new `v*` release tag, and pushing that to this fork would fire
+# ci.yml's release build for it.
 
 on:
   push:
