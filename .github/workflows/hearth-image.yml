@@ -36,11 +36,82 @@ jobs:
           swap-storage: false
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Resolves the version stamped into the binary and the frontend, and into a
-      # dump's VERSION file — which `vikunja restore` refuses to cross.
+      # Resolves the describe string used for the image TAG. It is deliberately
+      # no longer what gets stamped as RELEASE_VERSION — see the next step.
       - name: Git describe
         id: ghd
         uses: proudust/gh-describe@80412be8ce0e77d8afba6b340e34790bc772aa45 # v2.2.0
+
+      # ---------------------------------------------------------------------
+      # RELEASE_VERSION MUST PARSE AS A VERSION, AND A TAG NAME DOES NOT.
+      #
+      # This step exists because a backup ran for a week and could not be
+      # restored. `vikunja restore` calls checkVikunjaVersion
+      # (pkg/modules/dump/restore.go:501-533), which parses the dump's VERSION
+      # file with hashicorp/go-version and returns the parse error verbatim. We
+      # were feeding it `steps.ghd.outputs.describe` -- the deploy tag name -- so
+      # every dump this fork produced carried `hearth-2026-08-31`, and every
+      # restore died on `malformed version: hearth-2026-08-31`. Measured on
+      # hearth 2026-09-01, found by the monthly restore drill on its FIRST run.
+      #
+      # No tag matching this workflow's own `hearth-*` trigger can ever parse, so
+      # the tag convention is not the thing to change: it is deliberate, and it is
+      # what stops a deploy tag firing upstream's ci.yml. The VALUE is.
+      #
+      # SHAPE: <upstream base>-hearth.<digits of the deploy tag>
+      #        e.g. tag hearth-2026-09-01  ->  2.5.0-hearth.20260901
+      #
+      # A PRERELEASE SEGMENT (`-hearth.x`) AND NOT BUILD METADATA (`+hearth.x`),
+      # and that is measured rather than stylistic. go-version v1.9.0 IGNORES
+      # metadata in Compare, so 2.5.0+hearth.20260901 EQUALS 2.5.0+hearth.20260915
+      # -- which would let a dump from one of our builds load into a different one
+      # and silently defeat the schema-drift protection this check exists to give.
+      # With a prerelease segment the two are not equal, so the guard keeps
+      # working across our own rebuilds.
+      #
+      # THE BASE COMES FROM frontend/package.json, not a constant here. A
+      # hardcoded base would go on claiming 2.5.0 after the next upstream merge
+      # and nothing would notice; package.json's version moves with the merge by
+      # itself. `git describe` would also work but depends on tag fetch depth,
+      # which is a second thing that can quietly be wrong.
+      #
+      # KNOW THIS BEFORE CHANGING THE SHAPE: the check requires EQUALITY, so every
+      # change to this string makes older dumps unrestorable without the image
+      # that produced them. GHCR keeps old digests; a restore reads the dump's
+      # VERSION and uses the matching one. hearth carries the procedure in
+      # docs/runbooks/2026-09-01-vikunja-restore.md.
+      # ---------------------------------------------------------------------
+      - name: Resolve a parseable RELEASE_VERSION
+        id: relver
+        env:
+          # Via env, not interpolation: a git tag name is attacker-shaped input,
+          # which is the reasoning the step-summary block below already uses.
+          DEPLOY_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          base="$(jq -r '.version // empty' frontend/package.json)"
+          if [ -z "$base" ]; then
+            echo "::error::frontend/package.json has no .version to base RELEASE_VERSION on"
+            exit 1
+          fi
+          # Digits only. The tag is hearth-YYYY-MM-DD and its hyphens would be
+          # legal inside a prerelease segment but unreadable in a VERSION file.
+          stamp="$(printf '%s' "$DEPLOY_TAG" | tr -cd '0-9')"
+          if [ -z "$stamp" ]; then
+            echo "::error::deploy tag '$DEPLOY_TAG' carries no digits to stamp"
+            exit 1
+          fi
+          rv="${base}-hearth.${stamp}"
+          # FAIL HERE RATHER THAN AT RESTORE TIME. That is the whole lesson of
+          # this step: the old value was wrong for a week and only a drill found
+          # it. This mirrors what go-version accepts -- dotted numeric segments,
+          # then a prerelease starting with a letter.
+          if ! printf '%s' "$rv" | grep -qE '^[0-9]+(\.[0-9]+)*-[A-Za-z][0-9A-Za-z.-]*$'; then
+            echo "::error::composed RELEASE_VERSION '$rv' will not parse as a version"
+            exit 1
+          fi
+          echo "release_version=$rv" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_VERSION=$rv  (base $base from frontend/package.json, tag $DEPLOY_TAG)"
       - name: Login to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -71,8 +142,13 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # RELEASE_VERSION comes from the relver step, NOT from
+          # steps.ghd.outputs.describe. That was the tag name, it does not parse
+          # as a version, and it made every dump this fork produced unrestorable.
+          # No comment lines inside build-args: the action reads it as
+          # newline-separated KEY=VALUE and a `#` line is not one.
           build-args: |
-            RELEASE_VERSION=${{ steps.ghd.outputs.describe }}
+            RELEASE_VERSION=${{ steps.relver.outputs.release_version }}
           cache-from: type=gha
           # ignore-error because a full cache export can exceed the 10GB repo cap;
           # losing the cache must not fail the build.
@@ -86,6 +162,7 @@ jobs:
           REPO: ${{ github.repository }}
           DIGEST: ${{ steps.build.outputs.digest }}
           DESCRIBE: ${{ steps.ghd.outputs.describe }}
+          RELVER: ${{ steps.relver.outputs.release_version }}
         run: |
           {
             echo '### Pin this in `compose/vikunja/compose.yml`'
@@ -94,5 +171,9 @@ jobs:
             echo "image: ghcr.io/${REPO}@${DIGEST}"
             echo '```'
             echo
-            echo "RELEASE_VERSION: \`${DESCRIBE}\`"
+            echo "RELEASE_VERSION: \`${RELVER}\`  (describe was \`${DESCRIBE}\`)"
+            echo
+            echo "A dump taken by this image carries that RELEASE_VERSION in its"
+            echo "VERSION file, and \`vikunja restore\` requires an EXACT match --"
+            echo "so restoring one of its dumps needs this digest."
           } >> "$GITHUB_STEP_SUMMARY"
