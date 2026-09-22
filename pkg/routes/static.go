@@ -45,6 +45,13 @@ const (
 	cacheControlMax         = `max-age=315360000, public, max-age=31536000, s-maxage=31536000, immutable`
 	cacheControlNone        = `public, max-age=0, s-maxage=0, must-revalidate`
 	configScriptTagTemplate = `
+<!-- hearth fork: the one patched line, and it is deliberately HERE and not in
+     frontend/index.html, where Vite would try to resolve the href at BUILD time
+     and fail on a path that only exists at runtime. /brand/vikunja.css is served
+     by Caddy out of the hearth repo, not from this image, so a colour change
+     needs no rebuild. Comment lives in the string so gofmt leaves the const
+     block's alignment — and therefore the rest of this diff — alone. -->
+<link rel="stylesheet" href="/brand/vikunja.css">
 <script>
 	window.SENTRY_ENABLED = {{ .SENTRY_ENABLED }}
 	window.SENTRY_DSN = '{{ .SENTRY_DSN }}'
