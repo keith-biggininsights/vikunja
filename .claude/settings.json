@@ -1,4 +1,5 @@
 {
+  "autoMemoryDirectory": "/Users/keithbiggin/.claude-shared/memory/-Users-keithbiggin-Documents-Development-personal-vikunja",
   "permissions": {
     "allow": [
       "Bash(echo:*)",
